@@ -22,8 +22,14 @@
 
 
 int main(int argc, char* argv[]) {
-    // 获取配置单例并解析命令行
+
+    // 获取配置单例
     Config& config = Config::getInstance();
+
+    // 1. 首先解析配置文件（基础配置）
+    config.parse_config_file("config.conf");
+
+    // 2. 再解析命令行参数（高优先级，可覆盖文件配置）
     config.parse_args(argc, argv);
 
     // 打印启动信息

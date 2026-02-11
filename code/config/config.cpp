@@ -60,8 +60,8 @@ void Config::parse_args(int argc, char* argv[]) {
 void Config::parse_config_file(const std::string& filePath) {
     std::ifstream file(filePath);
     if(!file.is_open()) {
-        std::cerr << "[ERROR] Could not open config file: " << filePath << std::endl;
-        exit(EXIT_FAILURE);
+        std::cerr << "[WARN] Config file not found: " << filePath << ", using defaults" << std::endl;
+        return;  // return 允许使用默认配置
     }
     std::string line;
     while(std::getline(file, line)) {
