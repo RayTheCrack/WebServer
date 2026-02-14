@@ -1,7 +1,7 @@
 # Makefile for WebServer project
 
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -pthread
+CXXFLAGS = -std=c++23 -Wall -Wextra -O2 -pthread
 LDFLAGS = -pthread
 
 # Source and object directories
@@ -12,7 +12,8 @@ TARGET = $(BIN_DIR)/server
 
 # Source files
 SOURCES = $(SRC_DIR)/main.cpp \
-		  $(SRC_DIR)/config/config.cpp 
+		  $(SRC_DIR)/config/config.cpp \
+		  $(SRC_DIR)/log/log.cpp
 
 # Object files
 OBJECTS = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SOURCES))

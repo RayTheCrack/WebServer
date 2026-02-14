@@ -1,0 +1,5 @@
+2026-02-14 17:06:35.011 [INFO] === WebServer Starting ===
+2026-02-14 17:06:35.011 [INFO] This is an info message
+2026-02-14 17:06:35.011 [WARN] This is a warning
+2026-02-14 17:06:35.011 [ERROR] This is an error
+2026-02-14 17:06:35.011 [INFO] Placeholder loop. Press Ctrl+C to exit.

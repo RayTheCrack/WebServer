@@ -18,9 +18,11 @@ Config& Config::getInstance() {
     循环解析：直到扫描完所有参数，getopt 返回 -1，循环结束；
     非法处理：如果遇到 -h（不在 optstring 中），返回 ?，触发 default 分支，输出用法并退出。
 */
+
+// 注意：命令台参数只支持修改端口和线程数，其他配置项需要通过配置文件修改。
 void Config::parse_args(int argc, char* argv[]) {
     int opt;
-    while((opt = getopt(argc, argv, "p:t:r:l:")) != -1) {
+    while((opt = getopt(argc, argv, "p:t:")) != -1) {
         switch(opt) {
             case 'p': {
                 uint16_t _port = static_cast<uint16_t>(std::stoi(optarg));
@@ -28,7 +30,7 @@ void Config::parse_args(int argc, char* argv[]) {
                     std::cerr << "[ERROR] Invalid port number: " << optarg << std::endl;
                     exit(EXIT_FAILURE);
                 }
-                port = _port;
+                c_port = _port;
                 break;
             }
             case 't': {
@@ -37,20 +39,12 @@ void Config::parse_args(int argc, char* argv[]) {
                     std::cerr << "[ERROR] Invalid thread count: " << optarg << std::endl;
                     exit(EXIT_FAILURE);
                 }
-                thread_cnt = _thread_cnt;
+                c_thread_cnt = _thread_cnt;
                 break;
             
             }
-            case 'r': {
-                resource_root = optarg;
-                break;
-            }
-            case 'l': {
-                log_file = optarg;
-                break;  
-            }
             default: {
-                std::cerr << "Usage: " << argv[0] << " [-p port] [-t thread_count] [-r root_directory] [-l log_file]" << std::endl;
+                std::cerr << "Usage: " << argv[0] << " [-p port] [-t thread_count]" << std::endl;
                 exit(EXIT_FAILURE);
             }
         }
@@ -79,18 +73,25 @@ void Config::parse_config_file(const std::string& filePath) {
             value.erase(value.find_last_not_of(" \t") + 1);
 
 
-            if (key == "port") port = std::stoi(value);
-            else if (key == "thread_num") thread_cnt = std::stoi(value);
-            else if (key == "resource_root") resource_root = value;
-            else if (key == "log_file") log_file = value;
-            else if (key == "log_level") log_level = std::stoi(value);
-            else if (key == "max_body_size") MAX_BODY_SIZE = std::stoi(value);
-            else if (key == "connection_timeout") TIMEOUT = std::stoi(value);
-            else if (key == "db_host") db_host = value;
-            else if (key == "db_port") db_port = std::stoi(value);
-            else if (key == "db_user") db_user = value;
-            else if (key == "db_password") db_password = value;
-            else if (key == "db_name") db_name = value;
+            if (key == "port") c_port = std::stoi(value);
+            else if (key == "thread_num") c_thread_cnt = std::stoi(value);
+            else if (key == "resource_root") c_resource_root = value;
+            else if (key == "log_file") c_log_file = value;
+            else if (key == "open_log") c_open_log = (value == "true" or value == "1");
+            else if (key == "log_queue_size") c_log_queue_size = std::stoi(value);
+            else if (key == "opt_linger") c_isOptLinger = (value == "true" or value == "1");
+            else if (key == "trigger_mode") c_trigMode = std::stoi(value);
+            else if (key == "max_connections") c_maxConnection = std::stoi(value);
+            else if (key == "log_level") c_log_level = std::stoi(value);
+            else if (key == "max_body_size") c_max_body_size = std::stoi(value);
+            else if (key == "connection_timeout") c_timeout = std::stoi(value);
+            else if (key == "db_host") c_db_host = value;
+            else if (key == "db_port") c_db_port = std::stoi(value);
+            else if (key == "db_user") c_db_user = value;
+            else if (key == "db_password") c_db_password = value;
+            else if (key == "db_name") c_db_name = value;
+            else if (key == "connection_pool_size") c_conn_pool_num = std::stoi(value);
+
         }
     }
     file.close();
@@ -98,17 +99,23 @@ void Config::parse_config_file(const std::string& filePath) {
 
 void Config::print_config() const {
     std::cout << "=== Current Configuration ===" << std::endl;
-    std::cout << "Port: " << port << std::endl;
-    std::cout << "Thread Count: " << thread_cnt << std::endl;
-    std::cout << "Resource Root: " << resource_root << std::endl;
-    std::cout << "Log File: " << log_file << std::endl;
-    std::cout << "Log Level: " << log_level << std::endl;
-    std::cout << "Max Body Size: " << MAX_BODY_SIZE / (1024 * 1024) << " MB" << std::endl;
-    std::cout << "Connection Timeout: " << TIMEOUT << " seconds" << std::endl;
-    std::cout << "Database Host: " << db_host << std::endl;
-    std::cout << "Database Port: " << db_port << std::endl;
-    std::cout << "Database User: " << db_user << std::endl;
+    std::cout << "Port: " << c_port << std::endl;
+    std::cout << "Trigger Mode: " << (c_trigMode == 1 ? "LT" : "ET") << std::endl;
+    std::cout << "Max Connections: " << c_maxConnection << std::endl;
+    std::cout << "Opt Linger: " << (c_isOptLinger ? "Enabled" : "Disabled") << std::endl;
+    std::cout << "Thread Count: " << c_thread_cnt << std::endl;
+    std::cout << "Resource Root: " << c_resource_root << std::endl;
+    std::cout << "Open Log: " << (c_open_log ? "Yes" : "No") << std::endl;    
+    std::cout << "Log Queue Size: " << c_log_queue_size << std::endl; 
+    std::cout << "Log File: " << c_log_file << std::endl;
+    std::cout << "Log Level: " << c_log_level << std::endl;
+    std::cout << "Max Body Size: " << c_max_body_size / (1024 * 1024) << " MB" << std::endl;
+    std::cout << "Connection Timeout: " << c_timeout << " seconds" << std::endl;
+    std::cout << "Connection Pool Num: " << c_conn_pool_num << std::endl;
+    std::cout << "Database Host: " << c_db_host << std::endl;
+    std::cout << "Database Port: " << c_db_port << std::endl;
+    std::cout << "Database User: " << c_db_user << std::endl;
     // 不建议打印数据库密码哈 =.=
     // std::cout << "Database Password: " << db_password << std::endl; 
-    std::cout << "Database Name: " << db_name << std::endl;
+    std::cout << "Database Name: " << c_db_name << std::endl;
 }

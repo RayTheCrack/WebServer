@@ -13,300 +13,413 @@
 4. **资源管理** — 数据库连接池、定时器管理连接超时
 5. **静态文件服务** — 支持 MIME 类型、错误页面、安全路径检查
 
-### 实现顺序（从基础设施 → 协议 → 并发 → 优化）
-1. 项目骨架与构建系统
-2. 配置模块
-3. 日志模块
-4. 缓冲区模块
-5. HTTP 请求/响应 解析与构造
-6. HTTP 连接封装
-7. epoll 事件循环
-8. 线程池
-9. 定时器
-10. 数据库连接池
-11. WebServer 主逻辑
-12. 静态资源处理
-13. 集成测试与优化
-
----
-
----
-
-# 【第 1 步】项目骨架与构建系统
+# 【第 3 步】日志模块
 
 ## 目标
-建立一个可编译的基础项目，能够通过 `make` 构建并启动 `./server` 空程序，同时建立好初步的日志接口。
+实现一个现代 C++ 风格的异步日志系统，满足：
 
-## 1.1 创建 Makefile
+- 支持日志级别（DEBUG/INFO/WARN/ERROR）
+- 异步写入（主线程将日志消息入队，后台线程负责写盘）
+- 支持日志文件路径配置、按日期轮转（可扩展）
+- 使用 `std::string`，单例用静态局部变量返回引用
+- 基于提供的 `BlockDeque` 作为消息队列实现阻塞/超时取出
 
-在项目根目录创建 `Makefile`（用于编译整个项目）：
+设计思想：配置优先级由 `Config` 提供，日志系统由 `Logger::initLogger(...)` 初始化（可在 `main` 启动时通过 `Config` 进行初始化）。主线程记录日志时尽量只做格式化并入队，避免阻塞业务。
 
-```makefile
-# Makefile for WebServer project
+### 关键点
 
-CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -pthread
-LDFLAGS = -pthread
+- 使用 `std::unique_ptr<BlockDeque<std::string>>`，在 `initLogger` 时以 `max_queue_size` 构造队列。
+- 日志后台线程使用 `pop(..., timeout)` 带超时的方式取消息，保证在退出时能检测到停止条件并刷盘。
+- 提供 `format_string` 辅助函数实现 printf 风格格式化，返回 `std::string`。
 
-# Source and object directories
-SRC_DIR = code
-OBJ_DIR = build
-BIN_DIR = bin
-TARGET = $(BIN_DIR)/server
+下面把实现完整地列出（代码即仓库实现）：
 
-# Source files
-SOURCES = $(SRC_DIR)/main.cpp
-
-# Object files
-OBJECTS = $(SOURCES:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
-
-# Build target
-all: $(TARGET)
-
-$(TARGET): $(OBJECTS) | $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
-
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
-
-$(BIN_DIR) $(OBJ_DIR):
-	mkdir -p $@
-
-run: $(TARGET)
-	$(TARGET) -p 8080 -t 4 -r resources/
-
-clean:
-	rm -rf $(OBJ_DIR) $(BIN_DIR)
-
-.PHONY: all run clean
-```
-
-## 1.2 创建 main.cpp 入口点
-
-在 `code/main.cpp` 中实现基础入口：
+#### `code/log/blockqueue.h`
 
 ```cpp
-#include <iostream>
-#include <string>
-#include <cstring>
-#include <unistd.h>
+// BlockDeque 已修复版本（线程安全阻塞队列）
+#ifndef BLOCKQUEUE_H
+#define BLOCKQUEUE_H
+/*
+    BlockDeque是基于std::deque封装的线程安全阻塞队列，是异步日志的核心依赖。
+*/
+#include <mutex>
+#include <deque>
+#include <condition_variable>
+#include <sys/time.h>
+#include <atomic>
+#include <cassert>
 
-// 简单的日志宏（后续将被完整日志模块替换）
-#define LOG_INFO(fmt, ...) \
-    fprintf(stdout, "[INFO] " fmt "\n", ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) \
-    fprintf(stderr, "[ERROR] " fmt "\n", ##__VA_ARGS__)
+template<class T>
+class BlockDeque {
 
-// 全局配置（临时版本，后续替换为 Config 类）
-struct GlobalConfig {
-    int port = 8080;
-    int threads = 4;
-    std::string root = "resources/";
-} g_config;
-
-// 简单的参数解析
-void parse_args(int argc, char* argv[]) {
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
-            g_config.port = std::stoi(argv[++i]);
-        } else if ((arg == "-t" || arg == "--threads") && i + 1 < argc) {
-            g_config.threads = std::stoi(argv[++i]);
-        } else if ((arg == "-r" || arg == "--root") && i + 1 < argc) {
-            g_config.root = argv[++i];
-        }
-    }
-}
-
-int main(int argc, char* argv[]) {
-    // 解析命令行参数
-    parse_args(argc, argv);
-
-    // 打印启动信息
-    LOG_INFO("=== WebServer Starting ===");
-    LOG_INFO("Port: %d", g_config.port);
-    LOG_INFO("Threads: %d", g_config.threads);
-    LOG_INFO("Root: %s", g_config.root.c_str());
-
-    // 占位循环（后续替换为真实 WebServer)
-    LOG_INFO("Placeholder loop. Press Ctrl+C to exit.");
-    while (true) {
-        sleep(1);
-    }
-
-    return 0;
-}
-```
-
-## 1.3 编译与验证
-
-```bash
-# 进入项目根目录
-cd /home/oxythecrack/桌面/WebServer-master
-
-# 清空旧构建
-make clean
-
-# 编译项目
-make
-
-# 运行服务器
-./bin/server -p 8080 -t 4 -r resources/
-```
-
-**预期输出：**
-```
-[INFO] === WebServer Starting ===
-[INFO] Port: 8080
-[INFO] Threads: 4
-[INFO] Root: resources/
-[INFO] Placeholder loop. Press Ctrl+C to exit.
-```
-
-按 `Ctrl+C` 可以退出程序。
-
----
-
----
-
-# 【第 2 步】配置模块
-
-## 目标
-将硬编码的配置参数提取到 `Config` 类，支持命令行参数和配置文件（可选）。
-
-## 2.1 创建 config/config.h
-
-```cpp
-#ifndef CONFIG_H
-#define CONFIG_H
-
-#include <string>
-#include <map>
-
-class Config {
 public:
-    // 获取单例实例
-    static Config& GetInstance();
+    explicit BlockDeque(size_t Max_Campacity = 1000);
 
-    // 配置参数
-    int port = 8080;
-    int thread_num = 4;
-    std::string resource_root = "resources/";
-    std::string log_file = "log/webserver.log";
-    int log_level = 1;  // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
-    int max_body_size = 1024 * 1024;  // 1MB
-    int connection_timeout = 60;  // 秒
-    std::string db_host = "localhost";
-    int db_port = 3306;
-    std::string db_user = "root";
-    std::string db_password = "";
-    std::string db_name = "webserver";
+    ~BlockDeque();
 
-    // 解析命令行参数
-    void parse_command_line(int argc, char* argv[]);
+    void clear();
 
-    // 解析配置文件
-    void parse_config_file(const std::string& filepath);
+    bool empty();
 
-    // 打印当前配置
-    void print_config() const;
+    bool full();
+
+    void stop();
+
+    size_t size();
+
+    size_t capacity();
+
+    T front();
+
+    T back();
+
+    void push_front(const T& item);
+
+    void push_back(const T& item);
+
+    bool pop(T& item);
+
+    bool pop(T& item, int timeout);
+
+    void flush();
 
 private:
-    Config() = default;  // 单例私有构造
-    Config(const Config&) = delete;
-    Config& operator=(const Config&) = delete;
+    std::deque<T> deq_;
+
+    size_t capacity_;
+
+    std::mutex mtx_;
+
+    std::atomic<bool> is_running_;
+    
+    std::condition_variable condConsumer_;
+
+    std::condition_variable condProducer_;
 };
 
-#endif  // CONFIG_H
+// 模板实现
+template<class T>
+BlockDeque<T>::BlockDeque(size_t Max_Capacity) : capacity_(Max_Capacity) {
+    assert(Max_Capacity > 0);
+    is_running_.store(true);
+}
+
+template<class T>
+BlockDeque<T>::~BlockDeque() {
+    stop();
+}
+
+template<class T>
+void BlockDeque<T>::stop() {
+    {
+        std::unique_lock<std::mutex> locker(mtx_);
+        deq_.clear();
+        is_running_.store(false);
+    }
+    condConsumer_.notify_all();
+    condProducer_.notify_all();
+}
+
+template<class T>
+void BlockDeque<T>::flush() {
+    condProducer_.notify_one();
+}
+
+template<class T>
+void BlockDeque<T>::clear() {
+    std::unique_lock<std::mutex> locker(mtx_);
+    deq_.clear();
+}
+
+template<class T>
+bool BlockDeque<T>::empty() {
+    std::unique_lock<std::mutex> locker(mtx_);
+    return deq_.empty();
+}
+
+template<class T>
+bool BlockDeque<T>::full() {
+    std::unique_lock<std::mutex> locker(mtx_);
+    return deq_.size() >= capacity_;
+}
+
+template<class T>
+size_t BlockDeque<T>::size() {
+    std::unique_lock<std::mutex> locker(mtx_);
+    return deq_.size();
+}
+
+template<class T>
+size_t BlockDeque<T>::capacity() {
+    std::unique_lock<std::mutex> locker(mtx_);
+    return capacity_;
+}
+
+template<class T>
+T BlockDeque<T>::front() {
+    std::unique_lock<std::mutex> locker(mtx_);
+    return deq_.front();
+}
+
+template<class T>
+T BlockDeque<T>::back() {
+    std::unique_lock<std::mutex> locker(mtx_);
+    return deq_.back();
+}
+
+template<class T>
+void BlockDeque<T>::push_back(const T &item) {
+    std::unique_lock<std::mutex> locker(mtx_);
+    while(deq_.size() >= capacity_) {
+        condProducer_.wait(locker);
+    }
+    deq_.push_back(item);
+    condConsumer_.notify_one();
+}
+
+template<class T>
+void BlockDeque<T>::push_front(const T &item) {
+    std::unique_lock<std::mutex> locker(mtx_);
+    while(deq_.size() >= capacity_) {
+        condProducer_.wait(locker);
+    }
+    deq_.push_front(item);
+    condConsumer_.notify_one();
+}
+
+template<class T>
+bool BlockDeque<T>::pop(T &item) {
+    std::unique_lock<std::mutex> locker(mtx_);
+    while(deq_.empty()) {
+        condConsumer_.wait(locker);
+        if(!is_running_.load()) {
+            return false;
+        }
+    }
+    item = deq_.front();
+    deq_.pop_front();
+    condProducer_.notify_one();
+    return true;
+}
+
+template<class T>
+bool BlockDeque<T>::pop(T &item, int timeout) {
+    std::unique_lock<std::mutex> locker(mtx_);
+    while(deq_.empty()) {
+        if(condConsumer_.wait_for(locker, std::chrono::seconds(timeout)) == std::cv_status::timeout) {
+            return false;
+        }
+        if(!is_running_.load()) {
+            return false;
+        }
+    }
+    item = deq_.front();
+    deq_.pop_front();
+    condProducer_.notify_one();
+    return true;
+}
+
+#endif /* BLOCKQUEUE_H */
 ```
 
-## 2.2 创建 config/config.cpp
+#### `code/log/log.h`
 
 ```cpp
-#include "config.h"
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <cstring>
+// Logger 头文件（现代 C++）
+#ifndef LOG_H
+#define LOG_H
 
-Config& Config::GetInstance() {
-    static Config instance;
+#include <string>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <fstream>
+#include <atomic>
+#include <cstdarg>
+
+#include "blockqueue.h"
+#include "../config/config.h"
+
+enum class LogLevel { DEBUG=0, INFO=1, WARN=2, ERROR=3 };
+
+class Logger {
+public:
+    static Logger& getInstance();
+
+    void initLogger(const std::string& log_file = "./log/webserver.log", LogLevel level = LogLevel::INFO, int max_queue_size = 1024);
+    void log(LogLevel level, const std::string& message);
+    void shutdown();
+    void setLogLevel(LogLevel level);
+    LogLevel getLogLevel() const;
+
+private:
+    Logger() = default;
+    ~Logger();
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
+
+    void log_worker_thread();
+    std::string get_timestamp();
+    std::string get_level_name(LogLevel level);
+
+    std::string log_file_;
+    std::string current_date_;
+    std::ofstream log_stream_;
+    LogLevel current_level_;
+
+    std::unique_ptr<BlockDeque<std::string>> message_queue_;
+    std::thread worker_thread_;
+    std::atomic<bool> is_running_ {false};
+};
+
+std::string format_string(const std::string& fmt, ...);
+
+#define LOG_DEBUG(fmt, ...) \
+    do { Logger::getInstance().log(LogLevel::DEBUG, format_string(fmt, ##__VA_ARGS__)); } while(0)
+#define LOG_INFO(fmt, ...) \
+    do { Logger::getInstance().log(LogLevel::INFO, format_string(fmt, ##__VA_ARGS__)); } while(0)
+#define LOG_WARN(fmt, ...) \
+    do { Logger::getInstance().log(LogLevel::WARN, format_string(fmt, ##__VA_ARGS__)); } while(0)
+#define LOG_ERROR(fmt, ...) \
+    do { Logger::getInstance().log(LogLevel::ERROR, format_string(fmt, ##__VA_ARGS__)); } while(0)
+
+#endif // LOG_H
+```
+
+#### `code/log/log.cpp`
+
+```cpp
+// Logger 实现（异步写入）
+#include "log.h"
+
+#include <chrono>
+#include <iomanip>
+#include <filesystem>
+#include <iostream>
+
+using namespace std::chrono_literals;
+
+Logger& Logger::getInstance() {
+    static Logger instance;
     return instance;
 }
 
-void Config::parse_command_line(int argc, char* argv[]) {
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
-            port = std::stoi(argv[++i]);
-        } else if ((arg == "-t" || arg == "--threads") && i + 1 < argc) {
-            thread_num = std::stoi(argv[++i]);
-        } else if ((arg == "-r" || arg == "--root") && i + 1 < argc) {
-            resource_root = argv[++i];
-        } else if ((arg == "-l" || arg == "--log-level") && i + 1 < argc) {
-            log_level = std::stoi(argv[++i]);
-        } else if ((arg == "-c" || arg == "--config") && i + 1 < argc) {
-            parse_config_file(argv[++i]);
-        }
-    }
+void Logger::initLogger(const std::string& log_file, LogLevel level, int max_queue_size) {
+    if (is_running_.load()) return;
+    current_level_ = level;
+    log_file_ = log_file;
+
+    try {
+        std::filesystem::path p(log_file_);
+        if (p.has_parent_path()) std::filesystem::create_directories(p.parent_path());
+    } catch(...) {}
+
+    current_date_ = get_timestamp().substr(0, 10);
+    if (!log_file_.empty()) log_stream_.open(log_file_, std::ios::app);
+
+    message_queue_.reset(new BlockDeque<std::string>(static_cast<size_t>(max_queue_size)));
+    is_running_.store(true);
+    worker_thread_ = std::thread(&Logger::log_worker_thread, this);
 }
 
-void Config::parse_config_file(const std::string& filepath) {
-    std::ifstream file(filepath);
-    if (!file.is_open()) {
-        std::cerr << "[ERROR] Failed to open config file: " << filepath << std::endl;
-        return;
-    }
+void Logger::setLogLevel(LogLevel level) { current_level_ = level; }
+LogLevel Logger::getLogLevel() const { return current_level_; }
 
-    std::string line;
-    while (std::getline(file, line)) {
-        // 忽略注释和空行
-        if (line.empty() || line[0] == '#') continue;
-
-        std::istringstream iss(line);
-        std::string key, value;
-        if (std::getline(iss, key, '=') && std::getline(iss, value)) {
-            // 移除空格
-            key.erase(0, key.find_first_not_of(" \t"));
-            key.erase(key.find_last_not_of(" \t") + 1);
-            value.erase(0, value.find_first_not_of(" \t"));
-            value.erase(value.find_last_not_of(" \t") + 1);
-
-            if (key == "port") port = std::stoi(value);
-            else if (key == "thread_num") thread_num = std::stoi(value);
-            else if (key == "resource_root") resource_root = value;
-            else if (key == "log_file") log_file = value;
-            else if (key == "log_level") log_level = std::stoi(value);
-            else if (key == "max_body_size") max_body_size = std::stoi(value);
-            else if (key == "connection_timeout") connection_timeout = std::stoi(value);
-            else if (key == "db_host") db_host = value;
-            else if (key == "db_port") db_port = std::stoi(value);
-            else if (key == "db_user") db_user = value;
-            else if (key == "db_password") db_password = value;
-            else if (key == "db_name") db_name = value;
+void Logger::log(LogLevel level, const std::string& message) {
+    if (!is_running_.load()) {
+        if (level >= current_level_) {
+            std::string line = get_timestamp() + " [" + get_level_name(level) + "] " + message + "\n";
+            std::fwrite(line.data(), 1, line.size(), stdout);
         }
+        eturrn;
     }
-
-    file.close();
+    if (level < current_level_) return;
+    std::string line = get_timestamp() + " [" + get_level_name(level) + "] " + message;
+    message_queue_->push_back(line);
 }
 
-void Config::print_config() const {
-    std::cout << "=== WebServer Configuration ===" << std::endl;
-    std::cout << "Port: " << port << std::endl;
-    std::cout << "Threads: " << thread_num << std::endl;
-    std::cout << "Resource Root: " << resource_root << std::endl;
-    std::cout << "Log File: " << log_file << std::endl;
-    std::cout << "Log Level: " << log_level << std::endl;
-    std::cout << "Max Body Size: " << max_body_size << std::endl;
-    std::cout << "Connection Timeout: " << connection_timeout << std::endl;
-    std::cout << "DB Host: " << db_host << ":" << db_port << std::endl;
-    std::cout << "DB User: " << db_user << std::endl;
-    std::cout << "DB Name: " << db_name << std::endl;
+void Logger::shutdown() {
+    if (!is_running_.load()) return;
+    is_running_.store(false);
+    if (message_queue_) message_queue_->stop();
+    if (worker_thread_.joinable()) worker_thread_.join();
+    if (log_stream_.is_open()) { log_stream_.flush(); log_stream_.close(); }
+}
+
+Logger::~Logger() { shutdown(); }
+
+std::string Logger::get_timestamp() {
+    using namespace std::chrono;
+    auto now = system_clock::now();
+    auto tt = system_clock::to_time_t(now);
+    auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+    std::tm tm{};
+    localtime_r(&tt, &tm);
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << "." << std::setfill('0') << std::setw(3) << ms.count();
+    return oss.str();
+}
+
+std::string Logger::get_level_name(LogLevel level) {
+    switch(level) {
+        case LogLevel::DEBUG: return "DEBUG";
+        case LogLevel::INFO: return "INFO";
+        case LogLevel::WARN: return "WARN";
+        case LogLevel::ERROR: return "ERROR";
+    }
+    return "INFO";
+}
+
+void Logger::log_worker_thread() {
+    std::string entry;
+    while (is_running_.load() || (message_queue_ && message_queue_->size() > 0)) {
+        if (!message_queue_) break;
+        bool ok = message_queue_->pop(entry, 1); // 1s timeout
+        if (!ok) continue;
+        if (log_stream_.is_open()) log_stream_ << entry << std::endl;
+        else std::cout << entry << std::endl;
+    }
+    if (log_stream_.is_open()) log_stream_.flush();
+}
+
+// 简单 printf 风格格式化
+std::string format_string(const std::string& fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    va_list ap2;
+    va_copy(ap2, ap);
+    const int needed = std::vsnprintf(nullptr, 0, fmt.c_str(), ap);
+    std::string buf(needed + 1, '\0');
+    std::vsnprintf(&buf[0], buf.size(), fmt.c_str(), ap2);
+    va_end(ap2);
+    va_end(ap);
+    buf.resize(needed);
+    return buf;
 }
 ```
 
-## 2.3 修改 Makefile 以支持新文件
+### 使用与集成
 
+- 在 `main.cpp` 中通过 `Config` 读取 `log_file` 与 `log_level`，然后调用：
+
+```cpp
+Logger::getInstance().initLogger(config.log_file, (LogLevel)config.log_level, 2048);
+```
+
+- 使用 `LOG_INFO(...)` / `LOG_ERROR(...)` 等宏记录日志。
+- 程序退出时可显式调用 `Logger::getInstance().shutdown()`，或者依赖单例析构自动调用。
+
+### 测试建议
+
+- 编译并短时运行：
+```
+make
+timeout 2 ./bin/server || true
+```
+- 检查配置指定的日志文件是否出现并包含时间戳与日志级别。
+
+以上实现遵循现代 C++ 风格（`std::string`、智能指针、静态局部单例），并基于你提供的 `BlockDeque` 实现异步队列。
 修改 Makefile 的 `SOURCES` 行：
 
 ```makefile

@@ -11,18 +11,34 @@ public:
     // 获取单例实例
     static Config& getInstance();
     // 配置参数
-    uint32_t port = 8080;
-    int thread_cnt = 5;
-    std::string resource_root = "resources/";
-    std::string log_file = "log/webserver.log";    
-    int log_level = 1; // 0 : DEBUG 1 : INFO 2 : WARN 3 : ERROR
-    int MAX_BODY_SIZE = 1024 * 1024; // 最大请求体大小 1MB
-    int TIMEOUT = 60; // 默认超时时间 60s
-    std::string db_host = "localhost";
-    int db_port = 3306;
-    std::string db_user = "root";
-    std::string db_password = "password";
-    std::string db_name = "webserver";
+    /*
+            int port, int trigMode, int timeoutMS, bool OptLinger, 
+        int sqlPort, const char* sqlUser, const  char* sqlPwd, 
+        const char* dbName, int connPoolNum, int threadNum,
+        bool openLog, int logLevel, int logQueSize);
+    */
+
+    uint32_t c_port;
+    int c_thread_cnt;
+    int c_trigMode; // 1 LT 2 ET
+    int c_maxConnection;
+    bool c_isOptLinger; // 是否优雅关闭连接
+
+    std::string c_resource_root;
+
+    std::string c_log_file;    
+    int c_log_level; // 0 : DEBUG 1 : INFO 2 : WARN 3 : ERROR
+    int c_log_queue_size; // 日志队列大小
+    bool c_open_log; // 是否开启日志
+    int c_max_body_size; // 最大请求体大小 1MB
+    int c_timeout; // 默认超时时间 60s
+
+    int c_conn_pool_num; // 数据库连接池数量
+    std::string c_db_host;
+    int c_db_port;
+    std::string c_db_user;
+    std::string c_db_password;
+    std::string c_db_name;
 
     // 解析命令行参数
     void parse_args(int argc, char* argv[]);
