@@ -13,7 +13,8 @@ TARGET = $(BIN_DIR)/server
 # Source files
 SOURCES = $(SRC_DIR)/main.cpp \
 		  $(SRC_DIR)/config/config.cpp \
-		  $(SRC_DIR)/log/log.cpp
+		  $(SRC_DIR)/log/log.cpp \
+		  $(SRC_DIR)/buffer/buffer.cpp
 
 # Object files
 OBJECTS = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SOURCES))
@@ -32,7 +33,7 @@ $(BIN_DIR) $(OBJ_DIR):
 	mkdir -p $@
 
 run: $(TARGET)
-	$(TARGET) -p 8080 -t 4 -r resources/
+	$(TARGET) -p 8080 -t 4
 
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)

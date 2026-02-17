@@ -19,6 +19,7 @@
 #include <sys/time.h>
 
 #include "blockqueue.h"
+#include "../buffer/buffer.h"
 #include "../config/config.h"
 
 enum class LogLevel {
@@ -42,6 +43,7 @@ public:
          int max_queue_size = 1024);
     // 记录日志
     void log(LogLevel level, const std::string& message);
+    void log(LogLevel level, const Buffer& buffer);
     // 关闭日志系统，确保所有日志被写入文件
     void shutdown();
     // 设置日志级别
@@ -65,8 +67,13 @@ private:
     std::ofstream log_stream_; // 日志文件流，用于写入日志文件
 
     std::unique_ptr<BlockDeque<std::string>> message_queue_; // 日志消息队列，异步写入时使用，注意是指针类型，只有在异步模式下才会初始化
+    Buffer write_buffer_; // 写入缓冲区，用于批量写入日志
     std::thread worker_thread_; // 刷盘线程
     std::atomic<bool> is_running_; // 标志日志系统是否正在运行
+    int64_t LEAST_FLUSH_SEC_GAP = 5; // 最小刷新间隔，单位为秒
+    std::chrono::time_point<std::chrono::steady_clock> last_flush_time_; // 上次刷新时间
+    void flush(); // 将缓冲区中的日志写入文件
+    void flush_if_need(); // 检查是否需要刷新日志文件
 };
 
 // C++20 std::format 实现的格式化字符串函数，支持任意类型参数，类似于 printf 风格, 占位符为 {}
