@@ -64,19 +64,51 @@ bool HttpRequest::parse(Buffer& buff) {
     return true;
 }
 
+// 请求行形式 ： GET / HTTP/1.1
 bool HttpRequest::ParseRequestLine_(const std::string line) {
-    std::regex pattern("^([^ ]*) ([^ ]*) HTTP/([^ ]*)$");
-    std::smatch submatch;
-    if(std::regex_match(line, submatch, pattern)) {
-        method_ = submatch[1];
-        path_ = submatch[2];
-        version_ = submatch[3];
-        state_ = HEADERS;
-        return true;
+    // 使用字符串查找代替正则表达式，提高效率
+    size_t method_end = line.find(' ');
+    if(method_end == std::string::npos) {
+        LOG_ERROR("RequestLine Error : {}", line.c_str());
+        return false;
     }
-    LOG_ERROR("RequestLine Error : %s", line.c_str());
-    return false;
+    size_t path_end = line.find(' ', method_end + 1);
+    if(path_end == std::string::npos) {
+        LOG_ERROR("RequestLine Error : {}", line.c_str());
+        return false;
+    }
+    // 查找 HTTP/ 前缀
+    size_t http_pos = line.find("HTTP/", path_end + 1);
+    if(http_pos == std::string::npos) {
+        LOG_ERROR("RequestLine Error : {}", line.c_str());
+        return false;
+    }
+    method_ = line.substr(0, method_end);
+    path_ = line.substr(method_end + 1, path_end - method_end - 1);
+    version_ = line.substr(http_pos + 5);  // 跳过 "HTTP/"
+    state_ = HEADERS;
+    return true;
 }
+
+// Header 形式 : key: value
+void HttpRequest::ParseHeader_(const std::string& line) {
+    // 使用字符串查找代替正则表达式，提高效率
+    size_t colon_pos = line.find(':');
+    if(colon_pos != std::string::npos) {
+        std::string key = line.substr(0, colon_pos);
+        std::string value = line.substr(colon_pos + 1);
+        // 去除value开头的空格
+        size_t value_start = value.find_first_not_of(" \t");
+        if(value_start != std::string::npos) {
+            value = value.substr(value_start);
+        } else {
+            value.clear();  // 如果全是空格，则清空value
+        }
+        
+        header_[key] = value;
+    }
+    else state_ = BODY;
+}      
 
 void HttpRequest::ParsePath_() {
     if(path_ == "/") path_ = "/index.html";
@@ -88,24 +120,14 @@ void HttpRequest::ParsePath_() {
             }
         }
     }
-}   
-
-void HttpRequest::ParseHeader_(const std::string& line) {
-    std::regex pattern("^([^:]*): ?(.*)$");
-    std::smatch submatch;
-    if(std::regex_match(line, submatch, pattern)) {
-        header_[submatch[1]] = submatch[2];
-    }
-    else state_ = BODY;
-}       
+}    
 
 void HttpRequest::ParseBody_(const std::string& line) {
     body_ = line;
     ParsePost_();
     state_ = FINISH;
-    LOG_DEBUG("Body : %s, len : %d", line.c_str(), line.size());
+    LOG_DEBUG("Body : {}, len : {}", line.c_str(), line.size());
 }
-
 /**
  * @brief 解析POST请求的函数
  * 该函数处理POST请求，特别是Content-Type为application/x-www-form-urlencoded的请求
@@ -120,7 +142,7 @@ void HttpRequest::ParsePost_() {
         if(DEFAULT_HTML_TAG.count(path_)) {
             // 获取对应的标签值
             int tag = DEFAULT_HTML_TAG.find(path_)->second;
-            LOG_DEBUG("Tag:%d", tag);
+            LOG_DEBUG("Tag: {}", tag);
             // 根据标签值判断是登录还是注册操作
             if(tag == 0 or tag == 1) {
                 // 设置是否为登录操作的标志
@@ -145,12 +167,14 @@ void HttpRequest::ParsePost_() {
  * @return 返回转换后的整数值，如果不是有效的十六进制字符则返回字符本身
  */
 int HttpRequest::ConverHex(char ch) {
+    // 如果字符是数字 0-9，则转换为对应的整数值 (0-9)
+    if(ch >= '0' && ch <= '9') return ch - '0';
     // 如果字符是大写字母 A-F，则转换为对应的整数值 (10-15)
-    if(ch >= 'A' && ch <= 'F') return ch -'A' + 10;
+    if(ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
     // 如果字符是小写字母 a-f，则转换为对应的整数值 (10-15)
-    if(ch >= 'a' && ch <= 'f') return ch -'a' + 10;
-    // 如果字符不是有效的十六进制字符，则返回字符本身
-    return ch;
+    if(ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    // 如果字符不是有效的十六进制字符，则返回-1
+    return -1;
 }
 
 /**
@@ -173,7 +197,8 @@ void HttpRequest::ParseFromUrlencoded_() {
                 break;
             
             case '+':  // 加号表示空格
-                // 不修改原 body_，而是在拼接 value 时处理
+                // 先添加从j到当前位置的普通字符
+                if(j < i) value += body_.substr(j, i - j);
                 value += ' ';  // 将加号转换为空格
                 j = i + 1;
                 i++;
@@ -185,10 +210,12 @@ void HttpRequest::ParseFromUrlencoded_() {
                     i++;
                     break;
                 }
+                // 先添加从j到当前位置的普通字符
+                if(j < i) value += body_.substr(j, i - j);
                 int high = ConverHex(body_[i + 1]);
                 int low = ConverHex(body_[i + 2]);
                 // 校验十六进制字符合法性
-                if (high == -1 or low == -1) {
+                if (high < 0 or low < 0) {
                     i += 3;
                     j = i;
                     break;
@@ -205,7 +232,7 @@ void HttpRequest::ParseFromUrlencoded_() {
                 if (j < i and !key.empty()) {
                     value += body_.substr(j, i - j);
                     post_[key] = value;
-                    LOG_DEBUG("%s = %s", key.c_str(), value.c_str());
+                    LOG_DEBUG("[key ,value] = [{} : {}]", key.c_str(), value.c_str());
                     // 重置 key/value，准备下一个键值对
                     key.clear();
                     value.clear();
@@ -215,9 +242,7 @@ void HttpRequest::ParseFromUrlencoded_() {
                 break;
             
             default:
-                // 普通字符直接拼入 value
-                if(!key.empty())  // 只有解析完 key 后才拼接 value
-                    value += ch;
+                // 普通字符不做处理，直接让i继续前进
                 i++;
                 break;
         }
@@ -250,6 +275,95 @@ std::string HttpRequest::GetPost(const std::string& key) const {
     return "";
 }
 
+std::string HttpRequest::GetPost(const char* key) const {
+    assert(key != nullptr);
+    if(post_.count(key) == 1) return post_.find(key)->second;
+    return "";
+}
+
+bool HttpRequest::UserVerify(const std::string& name, const std::string& password, bool isLogin) {
+    if(name == "" or password == "") return false;
+    // 验证用户名格式：只允许字母、数字和下划线
+    for(char ch : name) {
+        if(!((ch >= 'a' && ch <= 'z') or
+           (ch >= 'A' && ch <= 'Z') or 
+           (ch >= '0' && ch <= '9') or 
+           ch == '_')) {
+            LOG_DEBUG("Invalid username format: {}", name);
+            return false;
+        }
+    }
+    // 验证密码格式：只允许字母、数字和下划线
+    for(char ch : password) {
+        if(!((ch >= 'a' && ch <= 'z') or
+           (ch >= 'A' && ch <= 'Z') or 
+           (ch >= '0' && ch <= '9') or 
+           ch == '_')) {
+            LOG_DEBUG("Invalid password format!");
+            return false;
+        }
+    }
+    LOG_INFO("User Verifying: {}", name);
+    MYSQL* sql = nullptr;
+    SqlConnRAII(&sql, &SqlConnPool::getInstance()); // 从连接池中获取数据库连接
+    assert(sql);
+    // 验证结果标记，默认FALSE
+    bool flag = false;
+    char query[256] = {0}; // 查询语句缓冲区
+    // MySQL字段结构指针（存储查询结果的字段信息）
+    // MYSQL_FIELD* fields = nullptr;
+    // MySQL结果集指针（存储查询返回的数据）
+    MYSQL_RES* res = nullptr;
+    // 注册场景默认标记为true（假设用户名未被占用，后续查询后修正）
+    if(!isLogin) flag = true;
+    // snprintf : 格式化字符串，将查询语句格式化到query中，此处有SQL注入风险，需注意
+    snprintf(query, 256, "SELECT username, password FROM user WHERE username = '%s' LIMIT 1",name.c_str());
+    LOG_DEBUG("{}", query); // 打印查询语句
+
+    // 执行查询语句，如果失败则释放结果集并返回false，注意：mysql_query返回0表示成功
+    if(mysql_query(sql, query)) {
+        mysql_free_result(res);
+        return false;
+    }
+
+    res = mysql_store_result(sql); // 执行查询并存储结果
+    // cnt = mysql_num_fields(res); // 获取查询结果中的字段数量
+    // fields = mysql_fetch_fields(res); // 获取字段信息
+
+    // 遍历查询结果
+    while(MYSQL_ROW row = mysql_fetch_row(res)) {
+        LOG_DEBUG("MYSQL ROW: {} {}", row[0], row[1]);
+        std::string pwd(row[1]); // 获取数据库中存储的密码
+        if(isLogin) {
+            if(password == pwd) flag = true; // 登录时，密码匹配则标记为true
+            else {
+                flag = false;
+                LOG_DEBUG("Password is wrong!");
+            }
+        } //  注册场景：查询到记录→用户名已存在，验证失败
+        else {
+            flag = false;
+            LOG_DEBUG("Username already exists!");
+        }
+    }       
+    mysql_free_result(res); // 释放结果集
+    // 注册行为，且用户名未被占用，则将用户名和密码插入数据库
+    if(!isLogin and flag) {
+        LOG_DEBUG("Registering user: {}", name);
+        bzero(query, 256); // 清空缓冲区
+        snprintf(query, 256, "INSERT INTO user(username, password) VALUES('%s', '%s')", name.c_str(), password.c_str());
+        LOG_DEBUG("{}", query);
+        if(mysql_query(sql, query)) {
+            LOG_DEBUG("Database insert user failed!");
+            flag = false;
+        }
+        else flag = true; 
+    }
+    // 无需手动释放，RAII机制会自动释放，手动释放可能造成资源重复释放
+    // SqlConnPool::getInstance().freeConnection(sql); // 释放数据库连接
+    LOG_INFO("User {} Verify Successful!!", name);
+    return flag;
+}
 
 
 

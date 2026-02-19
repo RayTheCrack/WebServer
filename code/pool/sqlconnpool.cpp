@@ -64,8 +64,8 @@ void SqlConnPool::freeConnection(MYSQL* sql) {
     std::unique_lock<std::mutex> lock(mtx_);
     connQue_.push(sql);
     freeCount_.fetch_add(1);
-    useCount_.fetch_sub(1);
-    cv_.notify_one();
+    useCount_.fetch_sub(1); 
+    cv_.notify_one(); // 唤醒一个等待的线程
     LOG_DEBUG("Free sql connection success! free: {}, use: {}", freeCount_.load(), useCount_.load());
 }
 

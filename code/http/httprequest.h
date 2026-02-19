@@ -4,9 +4,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <string>
-#include <regex>
 #include <errno.h>
 
+#include "../pool/sqlconnRAII.h"
 #include "../log/log.h"
 #include "../buffer/buffer.h"
 
