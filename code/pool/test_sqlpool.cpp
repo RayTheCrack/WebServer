@@ -76,7 +76,7 @@ void test_pool_status() {
 
 int main() {
     // 初始化日志系统
-    Logger::getInstance().initLogger("test_sqlpool.log", LogLevel::DEBUG, 1024, 3);
+    Logger::getInstance().initLogger("log/test_sqlpool.log", LogLevel::DEBUG, 1024, 3);
 
     LOG_INFO("=== Starting SQL Connection Pool Test ===");
 
