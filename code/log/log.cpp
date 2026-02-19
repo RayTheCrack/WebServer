@@ -10,12 +10,14 @@ Logger& Logger::getInstance() {
     return instance;
 }
 
-void Logger::initLogger(const std::string& log_file, LogLevel level, int max_queue_size) {
+void Logger::initLogger(const std::string& log_file,
+     LogLevel level, int max_queue_size, int64_t log_flush_interval) {
     if (is_running_.load()) {
         return; // 已经初始化
     }
     current_level_ = level;
     log_file_ = log_file;
+    LEAST_FLUSH_SEC_GAP = log_flush_interval;
 
     std::filesystem::path log_path(log_file_);
     // 确保日志目录存在，如果不存在则创建
@@ -63,27 +65,6 @@ void Logger::log(LogLevel level, const std::string& msg) {
         return;
     }
     std::string line = get_timestamp() + " [" + get_level_name(level) + "] " + msg;
-    message_queue_->push_back(std::move(line)); // 将日志消息放入队列，异步写入
-}
-
-void Logger::log(LogLevel level, const Buffer& buffer) {
-    if(level < current_level_) return; // 级别过低，不记录
-    // 如果日志系统未初始化或已关闭，直接输出到标准输出（避免丢失重要日志）
-    if (!is_running_.load()) {
-        if (level >= current_level_) {
-            std::string timestamp = get_timestamp();
-            std::string level_name = get_level_name(level);
-            std::string line = timestamp + " [" + level_name + "] ";
-            std::fwrite(line.data(), 1, line.size(), stdout);
-            std::fwrite(buffer.peek(), 1, buffer.readable_size(), stdout);
-            std::fwrite("\n", 1, 1, stdout);
-        }
-        return;
-    }
-    // 将Buffer内容转换为字符串放入队列
-    std::string timestamp = get_timestamp();
-    std::string level_name = get_level_name(level);
-    std::string line = timestamp + " [" + level_name + "] " + std::string(buffer.peek(), buffer.readable_size());
     message_queue_->push_back(std::move(line)); // 将日志消息放入队列，异步写入
 }
 

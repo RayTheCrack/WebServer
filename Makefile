@@ -2,7 +2,7 @@
 
 CXX = g++
 CXXFLAGS = -std=c++23 -Wall -Wextra -O2 -pthread
-LDFLAGS = -pthread
+LDFLAGS = -pthread -lmysqlclient 
 
 # Source and object directories
 SRC_DIR = code
@@ -14,7 +14,9 @@ TARGET = $(BIN_DIR)/server
 SOURCES = $(SRC_DIR)/main.cpp \
 		  $(SRC_DIR)/config/config.cpp \
 		  $(SRC_DIR)/log/log.cpp \
-		  $(SRC_DIR)/buffer/buffer.cpp
+		  $(SRC_DIR)/buffer/buffer.cpp \
+		  $(SRC_DIR)/http/httprequest.cpp \
+		  $(SRC_DIR)/pool/sqlconnpool.cpp
 
 # Object files
 OBJECTS = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SOURCES))

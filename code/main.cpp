@@ -18,7 +18,8 @@ int main(int argc, char* argv[]) {
     config.parse_args(argc, argv);
 
     // 初始化日志系统（使用 config 中的配置）
-    Logger::getInstance().initLogger(config.c_log_file, static_cast<LogLevel>(config.c_log_level));
+    Logger::getInstance().initLogger(config.c_log_file, static_cast<LogLevel>(config.c_log_level),
+    config.c_log_queue_size, config.c_log_flush_interval);
 
     // 打印启动信息
     LOG_INFO("=== WebServer Starting ===");

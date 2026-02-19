@@ -38,9 +38,8 @@ public:
     static Logger& getInstance();
 
     // 初始化日志系统，指定日志文件路径和日志级别
-    void initLogger(const std::string& log_file = "./log/webserver.log",
-         LogLevel level = LogLevel::INFO, 
-         int max_queue_size = 1024);
+    void initLogger(const std::string& log_file,
+         LogLevel level, int max_queue_size, int64_t log_flush_inteval);
     // 记录日志
     void log(LogLevel level, const std::string& message);
     void log(LogLevel level, const Buffer& buffer);
@@ -70,7 +69,7 @@ private:
     Buffer write_buffer_; // 写入缓冲区，用于批量写入日志
     std::thread worker_thread_; // 刷盘线程
     std::atomic<bool> is_running_; // 标志日志系统是否正在运行
-    int64_t LEAST_FLUSH_SEC_GAP = 5; // 最小刷新间隔，单位为秒
+    int64_t LEAST_FLUSH_SEC_GAP; // 最小刷新间隔，单位为秒
     std::chrono::time_point<std::chrono::steady_clock> last_flush_time_; // 上次刷新时间
     void flush(); // 将缓冲区中的日志写入文件
     void flush_if_need(); // 检查是否需要刷新日志文件

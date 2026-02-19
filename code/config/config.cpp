@@ -77,6 +77,7 @@ void Config::parse_config_file(const std::string& filePath) {
             else if (key == "thread_num") c_thread_cnt = std::stoi(value);
             else if (key == "resource_root") c_resource_root = value;
             else if (key == "log_file") c_log_file = value;
+            else if (key == "log_flush_interval") c_log_flush_interval = std::stoi(value);
             else if (key == "open_log") c_open_log = (value == "true" or value == "1");
             else if (key == "log_queue_size") c_log_queue_size = std::stoi(value);
             else if (key == "opt_linger") c_isOptLinger = (value == "true" or value == "1");
@@ -109,6 +110,7 @@ void Config::print_config() const {
     std::cout << "Log Queue Size: " << c_log_queue_size << std::endl; 
     std::cout << "Log File: " << c_log_file << std::endl;
     std::cout << "Log Level: " << c_log_level << std::endl;
+    std::cout << "Log Flush Interval: " << c_log_flush_interval << " seconds" << std::endl;
     std::cout << "Max Body Size: " << c_max_body_size / (1024 * 1024) << " MB" << std::endl;
     std::cout << "Connection Timeout: " << c_timeout << " seconds" << std::endl;
     std::cout << "Connection Pool Num: " << c_conn_pool_num << std::endl;

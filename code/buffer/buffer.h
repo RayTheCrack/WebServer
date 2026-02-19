@@ -6,7 +6,11 @@
 #include <iostream>
 #include <cstring>
 #include <cassert>
-
+/*
+    Buffer 类用于管理缓冲区，实现自动扩容，避免频繁分配内存，并实现空间复用
+    并且提供常用的缓冲区操作，如读取、写入、查找等
+    适用于需要高效处理大量数据的场景，如网络编程、文件读写等
+*/
 class Buffer { 
 
 public:
@@ -43,6 +47,10 @@ public:
     char* begin_write() {
         return buffer_.data() + write_ptr_; // 返回指向可写空间的指针
     }
+    // const 版本，用于只读操作，相当于readable_end()
+    const char* begin_write_const() const {
+        return buffer_.data() + write_ptr_;
+    }
 
     // 追加数据到缓冲区
     void append(const char* data, size_t len);
@@ -58,6 +66,12 @@ public:
         read_ptr_ += len; // 更新读指针位置
         return result;
     }   
+
+    // 读取数据直到某个指针位置
+    void retrieve_until(const char* end) {
+        assert(end >= peek() and end <= begin_write_const());
+        retrieve(end - peek());
+    }
     
     // 跳过数据
     void skip(size_t len) {

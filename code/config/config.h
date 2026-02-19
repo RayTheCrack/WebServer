@@ -30,6 +30,7 @@ public:
     int c_log_level; // 0 : DEBUG 1 : INFO 2 : WARN 3 : ERROR
     int c_log_queue_size; // 日志队列大小
     bool c_open_log; // 是否开启日志
+    int64_t c_log_flush_interval; // 日志刷新间隔
     int c_max_body_size; // 最大请求体大小 1MB
     int c_timeout; // 默认超时时间 60s
 
